@@ -2,6 +2,7 @@ package go_stream
 
 import (
 	"context"
+	"log"
 	"sync"
 )
 
@@ -148,10 +149,11 @@ func (s *Stream) closeChanChain() {
 	}
 }
 
+// 避免MapFunction panic导致协程数量减少，最终输出的数据可能由于recover 比初始的数量少
 func (s *Stream) secureProcess(function MapFunction, param interface{}) interface{} {
 	defer func() {
 		if err := recover(); err != nil {
-			//log.Errorf("process err happened:%s", err)
+			log.Printf("process err happened:%s", err)
 		}
 	}()
 	return function(s.ctx, param)
