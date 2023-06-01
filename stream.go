@@ -14,6 +14,7 @@ type Stream struct {
 	chanSize    int
 	stage       *StreamStage
 	ctx         context.Context
+	cc          *chanChain
 }
 
 type StreamStage struct {
@@ -21,6 +22,11 @@ type StreamStage struct {
 	o *outer
 }
 
+type chanChain struct {
+	c    chan interface{}
+	next *chanChain
+	w    *sync.WaitGroup
+}
 type inter struct {
 	inChan chan interface{}
 }
@@ -41,10 +47,13 @@ func AsStream(ctx context.Context, slice []interface{}, chanSize int) *Stream {
 
 	stageRoot := new(StreamStage)
 	stageRoot.i = &inter{inChan: inChan}
+
 	stream.stage = stageRoot
 	stream.ctx = ctx
+	stream.cc = &chanChain{
+		c: inChan,
+	}
 	//stream.refreshStreamStage()
-
 	return stream
 }
 
@@ -55,16 +64,19 @@ func (s *Stream) MapTo(function MapFunction, gStageCount int) *Stream {
 
 func (s *Stream) doStream(function MapFunction, gStageCount int) {
 	o := make(chan interface{}, s.chanSize)
+
 	curStage := s.stage
 	curStage.o = &outer{
 		outChan: o,
 	}
+
 	curIn := curStage.i.inChan
 	var w sync.WaitGroup //用于判断此次协程全部执行完毕
 	if gStageCount == 0 {
 		gStageCount = defaultStageGCount
 	}
 	w.Add(gStageCount)
+	s.addChanChain(o, &w)
 	//启动指定的协程数消费
 	gCount := 0
 	for {
@@ -83,13 +95,57 @@ func (s *Stream) doStream(function MapFunction, gStageCount int) {
 		gCount++
 	}
 
-	go func() {
-		//当前stage 全部退出时，关闭out chan
-		w.Wait()
-		close(o)
-	}()
+	//go func() {
+	//	//当前stage 全部退出时，关闭out chan
+	//	w.Wait()
+	//	close(o)
+	//}()
 
 	s.refreshStreamStage()
+}
+
+func (s *Stream) addChanChain(c chan interface{}, w *sync.WaitGroup) {
+	ccRoot := s.cc
+	ccCur := ccRoot
+	var ccPrev *chanChain
+	for {
+		if ccCur != nil {
+			ccPrev = ccCur
+			ccCur = ccCur.next
+		} else {
+			break
+		}
+	}
+	ccPrev.next = &chanChain{c: c, w: w}
+}
+
+func (s *Stream) closeChanChain() {
+	ccRoot := s.cc
+	ccCur := ccRoot
+	for {
+		if ccCur != nil {
+			if ccCur.w != nil {
+				go func(cc *chanChain) {
+					cNow := cc
+					for {
+						if cNow != nil {
+							cNow.w.Wait()
+							close(cNow.c)
+						} else {
+							break
+						}
+						cNow = cNow.next
+					}
+				}(ccCur)
+				break
+			} else {
+				close(ccCur.c)
+			}
+			ccCur = ccCur.next
+		} else {
+			break
+		}
+	}
 }
 
 func (s *Stream) secureProcess(function MapFunction, param interface{}) interface{} {
@@ -100,6 +156,7 @@ func (s *Stream) secureProcess(function MapFunction, param interface{}) interfac
 	}()
 	return function(s.ctx, param)
 }
+
 func (s *Stream) CollectAsList() []interface{} {
 	outerChan := s.stage.i.inChan
 	var w sync.WaitGroup
@@ -116,7 +173,7 @@ func (s *Stream) CollectAsList() []interface{} {
 		s.i.inChan <- data
 	}
 	//关闭初始的chan 驱动流
-	close(s.i.inChan)
+	s.closeChanChain()
 
 	//阻塞等待收集完成
 	w.Wait()
