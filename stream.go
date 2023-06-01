@@ -9,13 +9,15 @@ import (
 const defaultStageGCount = 1
 
 type Stream struct {
-	d           []interface{}
-	i           *inter
-	stageOffset int
-	chanSize    int
-	stage       *StreamStage
-	ctx         context.Context
-	cc          *chanChain
+	d                []interface{}
+	i                *inter
+	stageOffset      int
+	chanSize         int
+	stage            *StreamStage
+	ctx              context.Context
+	cc               *chanChain
+	beforeProcessors []BeforeProcessor //可以实现细粒度的日志追踪
+	afterProcessors  []AfterProcessor
 }
 
 type StreamStage struct {
@@ -36,7 +38,7 @@ type outer struct {
 	outChan chan interface{}
 }
 
-func AsStream(ctx context.Context, slice []interface{}, chanSize int) *Stream {
+func AsStream(ctx context.Context, slice []interface{}, chanSize int, beforeProcessors []BeforeProcessor, afterProcessors []AfterProcessor) *Stream {
 	inChan := make(chan interface{}, chanSize)
 	interRoot := &inter{
 		inChan: inChan,
@@ -54,6 +56,8 @@ func AsStream(ctx context.Context, slice []interface{}, chanSize int) *Stream {
 	stream.cc = &chanChain{
 		c: inChan,
 	}
+	stream.beforeProcessors = beforeProcessors
+	stream.afterProcessors = afterProcessors
 	//stream.refreshStreamStage()
 	return stream
 }
@@ -156,7 +160,22 @@ func (s *Stream) secureProcess(function MapFunction, param interface{}) interfac
 			log.Printf("process err happened:%s", err)
 		}
 	}()
-	return function(s.ctx, param)
+	s.beforeProcess(s.ctx, param)
+	res := function(s.ctx, param)
+	s.afterProcess(s.ctx, param, res)
+	return res
+}
+
+func (s *Stream) beforeProcess(ctx context.Context, param interface{}) {
+	for _, beforeProcessor := range s.beforeProcessors {
+		beforeProcessor(ctx, param)
+	}
+}
+
+func (s *Stream) afterProcess(ctx context.Context, param interface{}, res interface{}) {
+	for _, afterProcessor := range s.afterProcessors {
+		afterProcessor(ctx, param, res)
+	}
 }
 
 func (s *Stream) CollectAsList() []interface{} {
@@ -189,3 +208,7 @@ func (s *Stream) refreshStreamStage() {
 }
 
 type MapFunction func(ctx context.Context, i interface{}) interface{}
+
+type BeforeProcessor func(ctx context.Context, i interface{})
+
+type AfterProcessor func(ctx context.Context, i interface{}, res interface{})

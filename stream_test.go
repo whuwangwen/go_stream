@@ -35,7 +35,7 @@ func TestStream(t *testing.T) {
 		//time.Sleep(100 * time.Microsecond)
 		return intI
 	}
-	res := AsStream(context.Background(), s, 5).MapTo(map1Func, 5).MapTo(map2Func, 10).MapTo(map3Func, 5).CollectAsList()
+	res := AsStream(context.Background(), s, 5, nil, nil).MapTo(map1Func, 5).MapTo(map2Func, 10).MapTo(map3Func, 5).CollectAsList()
 
 	fmt.Println(res)
 	timeEnd := time.Now()
