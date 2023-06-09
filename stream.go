@@ -107,7 +107,10 @@ func (s *Stream) doStream(function MapFunction, gStageCount int) {
 			}()
 			//多协程消费chan
 			for m := range curIn {
-				o <- s.secureProcess(function, m)
+				res := s.secureProcess(function, m)
+				if res != nil {
+					o <- res
+				}
 			}
 		}(s.stageOffset)
 		gCount++
