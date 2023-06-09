@@ -38,7 +38,20 @@ type outer struct {
 	outChan chan interface{}
 }
 
-func AsStream(ctx context.Context, slice []interface{}, chanSize int, beforeProcessors []BeforeProcessor, afterProcessors []AfterProcessor) *Stream {
+func AsStream(slice []interface{}, options ...Option) *Stream {
+	streamOptions := &StreamOptions{
+		ctx:              context.Background(),
+		chanSize:         0,
+		beforeProcessors: nil,
+		afterProcessors:  nil,
+	}
+	for _, o := range options {
+		o(streamOptions)
+	}
+	chanSize := streamOptions.chanSize
+	ctx := streamOptions.ctx
+	beforeProcessors := streamOptions.beforeProcessors
+	afterProcessors := streamOptions.afterProcessors
 	inChan := make(chan interface{}, chanSize)
 	interRoot := &inter{
 		inChan: inChan,
@@ -212,3 +225,35 @@ type MapFunction func(ctx context.Context, i interface{}) interface{}
 type BeforeProcessor func(ctx context.Context, i interface{})
 
 type AfterProcessor func(ctx context.Context, i interface{}, res interface{})
+
+type StreamOptions struct {
+	ctx              context.Context
+	chanSize         int
+	beforeProcessors []BeforeProcessor //可以实现细粒度的日志追踪
+	afterProcessors  []AfterProcessor
+}
+
+type Option func(o *StreamOptions)
+
+func Context(ctx context.Context) Option {
+	return func(o *StreamOptions) {
+		o.ctx = ctx
+	}
+}
+
+func ChanSize(chanSize int) Option {
+	return func(o *StreamOptions) {
+		o.chanSize = chanSize
+	}
+}
+
+func BeforeProcessors(processors []BeforeProcessor) Option {
+	return func(o *StreamOptions) {
+		o.beforeProcessors = processors
+	}
+}
+func AfterProcessors(processors []AfterProcessor) Option {
+	return func(o *StreamOptions) {
+		o.afterProcessors = processors
+	}
+}
